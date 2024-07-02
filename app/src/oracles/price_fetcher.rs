@@ -1,6 +1,6 @@
 use std::{collections::HashMap, sync::Arc};
 
-use bindings::{i_irm::MarketParams, i_oracle::IOracle};
+use bindings::{i_irm::MarketParams, unlocked_oval_oracle::UnlockedOvalOracle};
 use ethers::{
     abi::AbiDecode,
     contract::{
@@ -19,6 +19,7 @@ pub trait PriceFetcher {
     fn fetch_prices(
         &self,
         provider: Arc<Provider<Http>>,
+        unlocked_oval_oracle_address: Address,
     ) -> impl std::future::Future<Output = Result<OraclePrices>> + Send;
 }
 
@@ -26,6 +27,7 @@ impl PriceFetcher for Vec<MarketParams> {
     fn fetch_prices(
         &self,
         provider: Arc<Provider<Http>>,
+        unlocked_oval_oracle_address: Address,
     ) -> impl std::future::Future<Output = Result<OraclePrices>> + Send {
         let mut oracle_addresses = Vec::new();
         self.iter().for_each(|market_param| {
@@ -34,24 +36,29 @@ impl PriceFetcher for Vec<MarketParams> {
             }
         });
 
-        fetch_all_oracle_prices(provider, oracle_addresses)
+        fetch_all_oracle_prices(provider, oracle_addresses, unlocked_oval_oracle_address)
     }
 }
 
 pub async fn fetch_all_oracle_prices(
     provider: Arc<Provider<Http>>,
     oracles_addresses: Vec<Address>,
+    unlocked_oval_oracle_address: Address,
 ) -> Result<OraclePrices> {
     let mut prices: OraclePrices = OraclePrices::new();
 
     let multicall = MulticallContract::new(MULTICALL_ADDRESS, provider.clone());
 
     let mut multicall_calls: Aggregate3Call = Aggregate3Call { calls: vec![] };
-    let calldata = IOracle::new(Address::random(), provider).price().calldata().unwrap();
 
     for oracle_address in oracles_addresses {
+        let calldata = UnlockedOvalOracle::new(Address::random(), provider.clone())
+            .unlocked_oracle_price(oracle_address)
+            .calldata()
+            .unwrap();
+
         multicall_calls.calls.push(Call3 {
-            target: oracle_address,
+            target: unlocked_oval_oracle_address,
             call_data: calldata.to_owned(),
             allow_failure: true,
         });

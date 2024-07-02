@@ -151,7 +151,10 @@ async fn process_new_block(
     db: &MorphoDB,
     client: &Arc<Provider<Http>>,
 ) -> Result<()> {
-    let oracle_prices = db.get_all_markets().fetch_prices(client.clone()).await?;
+    let oracle_prices = db
+        .get_all_markets()
+        .fetch_prices(client.clone(), config.unlocked_oval_oracle_address.parse::<Address>()?)
+        .await?;
 
     let market_ids = db.get_all_market_ids();
 
@@ -322,6 +325,7 @@ struct Config {
     http_rpc_url: String,
     file_name: String,
     liquidator_address: String,
+    unlocked_oval_oracle_address: String,
     private_rpc: String,
 }
 
@@ -332,6 +336,9 @@ impl Config {
             http_rpc_url: get_from_config("HTTP_RPC_URL".to_string())?,
             file_name: get_from_config("FILE_NAME".to_string())?,
             liquidator_address: get_from_config("LIQUIDATOR_ADDRESS".to_string())?,
+            unlocked_oval_oracle_address: get_from_config(
+                "UNLOCKED_OVAL_ORACLE_ADDRESS".to_string(),
+            )?,
             private_rpc: get_from_config("PRIVATE_RPC".to_string())?,
         })
     }
