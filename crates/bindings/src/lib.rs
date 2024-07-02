@@ -4,6 +4,12 @@
 //! Do not manually edit these files.
 //! These files may be overwritten by the codegen system at any time.
 pub mod address;
+pub mod aggregator_v3_interface;
+pub mod chainlink_data_feed_lib;
+pub mod decimal_lib;
+pub mod errors_lib;
+pub mod i_aggregator_v3;
+pub mod i_chainlink_source_adapter;
 pub mod i_events;
 pub mod i_irm;
 pub mod i_morpho;
@@ -17,7 +23,12 @@ pub mod i_morpho_supply_collateral_callback;
 pub mod i_oracle;
 pub mod ierc20;
 pub mod ierc20_permit;
+pub mod ierc4626;
 pub mod liquidator;
 pub mod market_params_lib;
+pub mod math;
+pub mod oval_unlocked_feed_lib;
 pub mod safe_erc20;
 pub mod shared_types;
+pub mod unlocked_oval_oracle;
+pub mod vault_lib;
