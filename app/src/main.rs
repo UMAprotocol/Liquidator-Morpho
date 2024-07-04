@@ -195,6 +195,7 @@ async fn process_new_block(
                         &position,
                         &market_params,
                         &market_info,
+                        price,
                     )
                     .await;
                     match result {

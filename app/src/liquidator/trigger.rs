@@ -7,7 +7,7 @@ use ethers::{
     middleware::SignerMiddleware,
     providers::{Http, Provider},
     signers::Wallet,
-    types::Address,
+    types::{Address, U256},
 };
 use eyre::Result;
 use log::{info, warn};
@@ -20,8 +20,9 @@ pub async fn trigger_liquidation(
     position: &Position,
     market_params: &MarketParams,
     market: &Market,
+    collateral_price: &U256,
 ) -> Result<()> {
-    let swap_params = find_swap_params(market_params, position, market)?;
+    let swap_params = find_swap_params(market_params, position, market, collateral_price)?;
 
     let tx = liquidator
         .liquidate_user(
