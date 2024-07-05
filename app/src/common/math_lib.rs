@@ -37,7 +37,7 @@ impl MathLib for U256 {
 
     /// Returns (`x` * `y`) / `d` rounded up.
     fn mul_div_up(&self, y: &U256, d: &U256) -> U256 {
-        (self * y) + (d - 1) / d
+        (self * y + (d - 1)) / d
     }
 
     /// Returns the sum of the first three non-zero terms of a Taylor expansion of e^(nx) - 1, to approximate a
