@@ -1,3 +1,4 @@
+use crate::one_inch::OneInch;
 use bindings::{
     i_morpho::{Market, MarketParams, Position},
     liquidator::Liquidator,
@@ -21,8 +22,17 @@ pub async fn trigger_liquidation(
     market_params: &MarketParams,
     market: &Market,
     collateral_price: &U256,
+    one_inch: &OneInch,
 ) -> Result<()> {
-    let swap_params = find_swap_params(market_params, position, market, collateral_price)?;
+    let swap_params = find_swap_params(
+        market_params,
+        position,
+        market,
+        collateral_price,
+        one_inch,
+        &liquidator.address(),
+    )
+    .await?;
 
     let tx = liquidator
         .liquidate_user(

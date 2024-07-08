@@ -1,9 +1,11 @@
 use crate::common::constants_lib::*;
 use crate::common::math_lib::{MathLib, WAD};
 use crate::common::shares_math_lib::SharesMathLib;
+use crate::one_inch::OneInch;
 use bindings::i_morpho::{Market, MarketParams, Position};
 use ethers::prelude::*;
-use eyre::{eyre, Result};
+use eyre::Result;
+use std::str::FromStr;
 
 pub struct SwapParams {
     pub target: Address,
@@ -11,35 +13,39 @@ pub struct SwapParams {
     pub seized_assets: U256,
 }
 
-pub fn find_swap_params(
+pub async fn find_swap_params(
     market_params: &MarketParams,
     position: &Position,
     market: &Market,
     collateral_price: &U256,
+    one_inch: &OneInch,
+    liquidator_address: &Address,
 ) -> Result<SwapParams> {
     let seized_assets = calculate_seized_assets(market_params, position, market, collateral_price);
 
-    match seized_assets {
-        Ok(amount) => {
-            // @todo Calculate amount to liquidated
-            // Call 1inch/solver APIs to fetch swap path and contract
-            let result = SwapParams {
-                target: Address::random(),
-                swap_data: Bytes::new(),
-                seized_assets: amount,
-            };
-            Ok(result)
-        }
-        Err(e) => Err(eyre!("Error in calculating seized amount: {}", e)),
-    }
+    let swap_calldata = one_inch
+        .swap_calldata(
+            &market_params.collateral_token.to_string(),
+            &market_params.loan_token.to_string(),
+            &liquidator_address.to_string(),
+            &seized_assets.to_string(),
+        )
+        .await?;
+
+    let target_address = Address::from_str(&swap_calldata.tx.to)?;
+    let swap_data = Bytes::from_str(&swap_calldata.tx.data)?;
+
+    Ok(SwapParams { target: target_address, swap_data, seized_assets })
 }
 
+// This does not handle errors as it is only used in the context of the liquidation and all the shares math replicates
+// the logic from Morpho Blue contract.
 fn calculate_seized_assets(
     market_params: &MarketParams,
     position: &Position,
     market: &Market,
     collateral_price: &U256,
-) -> Result<U256> {
+) -> U256 {
     let repaid_shares = U256::from(position.borrow_shares);
     let total_borrow_assets = U256::from(market.total_borrow_assets);
     let total_borrow_shares = U256::from(market.total_borrow_shares);
@@ -48,10 +54,8 @@ fn calculate_seized_assets(
     let liquidation_incentive_factor = MAX_LIQUIDATION_INCENTIVE_FACTOR
         .min(WAD.w_div_down(&(WAD - LIQUIDATION_CURSOR.w_mul_down(&(WAD - market_params.lltv)))));
 
-    let seized_assets = repaid_shares
+    repaid_shares
         .to_assets_down(&total_borrow_assets, &total_borrow_shares)
         .w_mul_down(&liquidation_incentive_factor)
-        .mul_div_down(&ORACLE_PRICE_SCALE, collateral_price);
-
-    Ok(seized_assets)
+        .mul_div_down(&ORACLE_PRICE_SCALE, collateral_price)
 }

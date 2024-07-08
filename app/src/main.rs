@@ -5,6 +5,7 @@ use app::{
         morpho_db::{FileManager, MorphoDB, MorphoDBImpl},
     },
     liquidator::trigger::trigger_liquidation,
+    one_inch::OneInch,
     oracles::price_fetcher::PriceFetcher,
 };
 use bindings::{
@@ -43,12 +44,16 @@ async fn main() -> Result<()> {
 
     let http_client = Arc::new(http_provider);
 
+    let chain_id = http_client.get_chainid().await?.to_string();
+    let one_inch = OneInch::new(&config.one_inch_api_key, &chain_id, config.one_inch_rate_limit);
+
     let mut db: MorphoDB = MorphoDB::load_memory_db(&config.file_name)?;
 
     let last_block = sync_to_lastest_block(&config, &mut db, http_client.clone()).await?;
     info!("Last block: {last_block}");
 
-    let result = subscribe(&config, &client, &mut db, last_block.into(), &http_client).await;
+    let result =
+        subscribe(&config, &client, &mut db, last_block.into(), &http_client, &one_inch).await;
 
     match result {
         Ok(_) => info!("Listening completed"),
@@ -64,6 +69,7 @@ async fn subscribe(
     db: &mut MorphoDB,
     block_number: U64,
     client: &Arc<Provider<Http>>,
+    one_inch: &OneInch,
 ) -> Result<()> {
     let morpho = IMorpho::new(MORPHO_ADDRESS.parse::<Address>()?, ws_client.clone());
 
@@ -89,7 +95,7 @@ async fn subscribe(
             },
             block = new_block_stream.next() => {
                 info!("New block received: {:?}", block.unwrap().number.unwrap());
-                let result = process_new_block(config, db, client).await;
+                let result = process_new_block(config, db, client, one_inch).await;
                 match result {
                     Ok(_) => info!("Successfully processed block"),
                     Err(e) => error!("Error while processing block: {:?}", e)
@@ -150,6 +156,7 @@ async fn process_new_block(
     config: &Config,
     db: &MorphoDB,
     client: &Arc<Provider<Http>>,
+    one_inch: &OneInch,
 ) -> Result<()> {
     let oracle_prices = db
         .get_all_markets()
@@ -196,6 +203,7 @@ async fn process_new_block(
                         &market_params,
                         &market_info,
                         price,
+                        one_inch,
                     )
                     .await;
                     match result {
@@ -328,6 +336,8 @@ struct Config {
     liquidator_address: String,
     unlocked_oval_oracle_address: String,
     private_rpc: String,
+    one_inch_api_key: String,
+    one_inch_rate_limit: u64,
 }
 
 impl Config {
@@ -341,10 +351,29 @@ impl Config {
                 "UNLOCKED_OVAL_ORACLE_ADDRESS".to_string(),
             )?,
             private_rpc: get_from_config("PRIVATE_RPC".to_string())?,
+            one_inch_api_key: get_from_config("ONE_INCH_API_KEY".to_string())?,
+            one_inch_rate_limit: get_from_config_optional(
+                "ONE_INCH_RATE_LIMIT".to_string(),
+                Some("1200".to_string()),
+            )?
+            .parse::<u64>()?,
         })
     }
 }
 
 fn get_from_config(key: String) -> Result<String> {
     Ok(std::env::var(key)?)
+}
+
+fn get_from_config_optional(key: String, default_value: Option<String>) -> Result<String> {
+    match std::env::var(&key) {
+        Ok(value) => Ok(value),
+        Err(_) => match default_value {
+            Some(default) => Ok(default),
+            None => Err(eyre::eyre!(
+                "Environment variable {} not found and no default value provided",
+                key
+            )),
+        },
+    }
 }
