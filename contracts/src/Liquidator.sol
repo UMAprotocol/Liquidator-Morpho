@@ -16,14 +16,14 @@ contract Liquidator is IMorphoLiquidateCallback, Ownable {
     using Address for address;
     using Address for address payable;
 
-    struct LiquidateParams {
+    struct CallbackParams {
         address swapper;
         address collateral;
         address debt;
         bytes swapData;
     }
 
-    struct SwapParams {
+    struct LiquidationParams {
         uint256 debtQuote;
         uint256 builderPaymentPercent;
         address swapper;
@@ -38,7 +38,7 @@ contract Liquidator is IMorphoLiquidateCallback, Ownable {
         MarketParams memory marketParams,
         address user,
         uint256 seizedAssets,
-        SwapParams memory swapParams
+        LiquidationParams memory liquidationParams
     ) external {
         IERC20 debt = IERC20(marketParams.loanToken);
         uint256 startBalance = debt.balanceOf(address(this));
@@ -49,8 +49,11 @@ contract Liquidator is IMorphoLiquidateCallback, Ownable {
             seizedAssets,
             0,
             abi.encode(
-                LiquidateParams(
-                    swapParams.swapper, marketParams.collateralToken, marketParams.loanToken, swapParams.swapData
+                CallbackParams(
+                    liquidationParams.swapper,
+                    marketParams.collateralToken,
+                    marketParams.loanToken,
+                    liquidationParams.swapData
                 )
             )
         );
@@ -59,22 +62,23 @@ contract Liquidator is IMorphoLiquidateCallback, Ownable {
         require(endBalance > startBalance, "Liquidator: Not profitable");
 
         uint256 grossProfit = endBalance - startBalance;
-        uint256 builderPayment = grossProfit * swapParams.debtQuote / 1e18 * swapParams.builderPaymentPercent / 1e18;
+        uint256 builderPayment =
+            grossProfit * liquidationParams.debtQuote / 1e18 * liquidationParams.builderPaymentPercent / 1e18;
         block.coinbase.sendValue(builderPayment);
     }
 
     function onMorphoLiquidate(uint256 repaidAssets, bytes calldata data) external {
         require(address(morpho) == msg.sender, "Liquidator: Invalid address");
 
-        LiquidateParams memory liquidateParams = abi.decode(data, (LiquidateParams));
+        CallbackParams memory callbackParams = abi.decode(data, (CallbackParams));
 
-        uint256 collateralSeized = IERC20(liquidateParams.collateral).balanceOf(address(this));
+        uint256 collateralSeized = IERC20(callbackParams.collateral).balanceOf(address(this));
 
-        IERC20(liquidateParams.collateral).safeIncreaseAllowance(liquidateParams.swapper, collateralSeized);
+        IERC20(callbackParams.collateral).safeIncreaseAllowance(callbackParams.swapper, collateralSeized);
 
-        liquidateParams.swapper.functionCall(liquidateParams.swapData);
+        callbackParams.swapper.functionCall(callbackParams.swapData);
 
-        IERC20(liquidateParams.debt).safeIncreaseAllowance(msg.sender, repaidAssets);
+        IERC20(callbackParams.debt).safeIncreaseAllowance(msg.sender, repaidAssets);
     }
 
     function swapProfit(address token, uint256 amount, address swapper, bytes calldata swapData) external onlyOwner {
