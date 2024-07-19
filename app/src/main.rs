@@ -23,7 +23,7 @@ use ethers::{
     providers::{Http, Provider, ProviderExt, StreamExt, Ws},
     types::{Address, U64},
 };
-use eyre::Result;
+use eyre::{eyre, Result};
 use log::{error, info, warn};
 use std::sync::Arc;
 
@@ -204,6 +204,7 @@ async fn process_new_block(
                         &market_info,
                         price,
                         one_inch,
+                        config.builder_payment_percent,
                     )
                     .await;
                     match result {
@@ -338,10 +339,20 @@ struct Config {
     private_rpc: String,
     one_inch_api_key: String,
     one_inch_rate_limit: u64,
+    builder_payment_percent: u8,
 }
 
 impl Config {
     fn build() -> Result<Self> {
+        let builder_payment_percent = get_from_config_optional(
+            "BUILDER_PAYMENT_PERCENT".to_string(),
+            Some("90".to_string()),
+        )?
+        .parse::<u8>()?;
+        if builder_payment_percent > 100 {
+            return Err(eyre!("Builder payment percent cannot be greater than 100"));
+        }
+
         Ok(Config {
             wss_rpc_url: get_from_config("WSS_RPC_URL".to_string())?,
             http_rpc_url: get_from_config("HTTP_RPC_URL".to_string())?,
@@ -357,6 +368,7 @@ impl Config {
                 Some("1200".to_string()),
             )?
             .parse::<u64>()?,
+            builder_payment_percent,
         })
     }
 }

@@ -11,6 +11,7 @@ pub struct SwapParams {
     pub target: Address,
     pub swap_data: Bytes,
     pub seized_assets: U256,
+    pub swapped_debt: U256,
 }
 
 pub async fn find_swap_params(
@@ -34,8 +35,9 @@ pub async fn find_swap_params(
 
     let target_address = Address::from_str(&swap_calldata.tx.to)?;
     let swap_data = Bytes::from_str(&swap_calldata.tx.data)?;
+    let swapped_debt = U256::from_str(&swap_calldata.dst_amount)?;
 
-    Ok(SwapParams { target: target_address, swap_data, seized_assets })
+    Ok(SwapParams { target: target_address, swap_data, seized_assets, swapped_debt })
 }
 
 // This does not handle errors as it is only used in the context of the liquidation and all the shares math replicates
