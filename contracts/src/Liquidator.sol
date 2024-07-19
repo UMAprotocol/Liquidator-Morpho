@@ -39,7 +39,7 @@ contract Liquidator is IMorphoLiquidateCallback, Ownable {
         address user,
         uint256 seizedAssets,
         LiquidationParams memory liquidationParams
-    ) external {
+    ) external onlyOwner {
         IERC20 debt = IERC20(marketParams.loanToken);
         uint256 startBalance = debt.balanceOf(address(this));
 
@@ -86,4 +86,6 @@ contract Liquidator is IMorphoLiquidateCallback, Ownable {
 
         swapper.functionCall(swapData);
     }
+
+    receive() external payable {}
 }
