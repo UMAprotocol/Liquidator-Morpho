@@ -110,8 +110,8 @@ async fn create_liquidation_tx<'a>(
     let liquidation_params = LiquidationParams {
         debt_quote: debt_quote.to_owned(),
         builder_payment_percent: U256::from(builder_payment_percent).w_div_down(&U256::from(100)),
-        swapper: swap_params.target.to_owned(),
-        swap_data: swap_params.swap_data.to_owned(),
+        swapper: swap_params.target,
+        swap_data: swap_params.swap_data.clone(),
     };
 
     let mut tx_request = liquidator
@@ -119,7 +119,7 @@ async fn create_liquidation_tx<'a>(
             market_params.to_owned(),
             user.to_owned(),
             swap_params.seized_assets,
-            liquidation_params.to_owned(),
+            liquidation_params,
         )
         .tx;
     liquidator.client().fill_transaction(&mut tx_request, None).await?;
@@ -127,7 +127,7 @@ async fn create_liquidation_tx<'a>(
     let raw_tx = tx_request
         .rlp_signed(&liquidator.client_ref().signer().sign_transaction(&tx_request).await?);
 
-    let tx_hash = TxHash(keccak256(raw_tx.to_owned()));
+    let tx_hash = TxHash(keccak256(raw_tx.clone()));
     let pending_tx = PendingTransaction::new(tx_hash, &liquidator.client_ref().provider());
 
     Ok((pending_tx, raw_tx))
