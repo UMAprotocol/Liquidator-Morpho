@@ -8,15 +8,16 @@ use bindings::{
 use ethers::{
     core::k256::ecdsa::SigningKey,
     middleware::SignerMiddleware,
-    providers::{Http, Provider},
-    signers::Wallet,
-    types::{Address, U256},
+    providers::{Http, Middleware, PendingTransaction, Provider},
+    signers::{Signer, Wallet},
+    types::{Address, Bytes, TxHash, U256},
+    utils::keccak256,
 };
 use eyre::{eyre, Result};
 use log::{info, warn};
 use std::str::FromStr;
 
-use super::swapper::find_swap_params;
+use super::swapper::{find_swap_params, SwapParams};
 
 const ETH_ADDRESS: &str = "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE";
 
@@ -50,23 +51,17 @@ pub async fn trigger_liquidation(
     let debt_quote =
         get_price_in_eth(&market_params.loan_token, &expected_debt_profit, one_inch).await?;
 
-    let liquidation_params = LiquidationParams {
-        debt_quote,
-        builder_payment_percent: U256::from(builder_payment_percent).w_div_down(&U256::from(100)),
-        swapper: swap_params.target.to_owned(),
-        swap_data: swap_params.swap_data.to_owned(),
-    };
+    let (pending_tx, _raw_tx) = create_liquidation_tx(
+        liquidator,
+        market_params,
+        user,
+        &swap_params,
+        &debt_quote,
+        builder_payment_percent,
+    ).await?;
 
-    let tx = liquidator
-        .liquidate_user(
-            market_params.to_owned(),
-            user.to_owned(),
-            swap_params.seized_assets,
-            liquidation_params,
-        )
-        .send()
-        .await?
-        .await?;
+    // TODO: submit raw tx over Oval node before waiting for the receipt.
+    let tx = pending_tx.await?;
 
     match tx {
         Some(receipt) => info!("Successful Transaction: {:?}", receipt),
@@ -96,4 +91,38 @@ async fn get_price_in_eth(token: &Address, amount: &U256, one_inch: &OneInch) ->
     let quote_amount = U256::from_str(&quote.dst_amount)?;
 
     Ok(quote_amount.w_div_down(amount))
+}
+
+async fn create_liquidation_tx<'a>(
+    liquidator: &'a Liquidator<SignerMiddleware<Provider<Http>, Wallet<SigningKey>>>,
+    market_params: &MarketParams,
+    user: &Address,
+    swap_params: &SwapParams,
+    debt_quote: &U256,
+    builder_payment_percent: u8,
+) -> Result<(PendingTransaction<'a, Http>, Bytes)> {
+    let liquidation_params = LiquidationParams {
+        debt_quote: debt_quote.to_owned(),
+        builder_payment_percent: U256::from(builder_payment_percent).w_div_down(&U256::from(100)),
+        swapper: swap_params.target.to_owned(),
+        swap_data: swap_params.swap_data.to_owned(),
+    };
+
+    let mut tx_request = liquidator
+        .liquidate_user(
+            market_params.to_owned(),
+            user.to_owned(),
+            swap_params.seized_assets,
+            liquidation_params.to_owned(),
+        )
+        .tx;
+    liquidator.client().fill_transaction(&mut tx_request, None).await?;
+
+    let raw_tx = tx_request
+        .rlp_signed(&liquidator.client_ref().signer().sign_transaction(&tx_request).await?);
+
+    let tx_hash = TxHash(keccak256(raw_tx.to_owned()));
+    let pending_tx = PendingTransaction::new(tx_hash, &liquidator.client_ref().provider());
+
+    Ok((pending_tx, raw_tx))
 }
