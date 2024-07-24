@@ -7,14 +7,14 @@ use tokio::sync::Mutex;
 use tokio::time::{sleep, Duration};
 
 #[derive(Clone)]
-pub struct OneInch {
+pub struct OneInchClient {
     swap_cli: Arc<Mutex<Client>>,
     chain_id: String,
     last_request_time: Arc<Mutex<Option<std::time::Instant>>>,
     rate_limit_millis: u64,
 }
 
-impl OneInch {
+impl OneInchClient {
     pub fn new(api_key: &str, chain_id: &str, rate_limit_millis: u64) -> Self {
         let client = Client::builder()
             .default_headers({

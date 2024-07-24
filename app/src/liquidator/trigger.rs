@@ -1,6 +1,6 @@
+use crate::aggregator::one_inch::OneInchClient;
 use crate::common::math_lib::MathLib;
 use crate::common::shares_math_lib::SharesMathLib;
-use crate::one_inch::OneInch;
 use bindings::{
     i_morpho::{Market, MarketParams, Position},
     liquidator::{LiquidationParams, Liquidator},
@@ -28,7 +28,7 @@ pub async fn trigger_liquidation(
     market_params: &MarketParams,
     market: &Market,
     collateral_price: &U256,
-    one_inch: &OneInch,
+    one_inch_client: &OneInchClient,
     builder_payment_percent: u8,
 ) -> Result<()> {
     let swap_params = find_swap_params(
@@ -36,7 +36,7 @@ pub async fn trigger_liquidation(
         position,
         market,
         collateral_price,
-        one_inch,
+        one_inch_client,
         &liquidator.address(),
     )
     .await?;
@@ -49,7 +49,7 @@ pub async fn trigger_liquidation(
     let expected_debt_profit = swap_params.swapped_debt - repaid_debt;
 
     let debt_quote =
-        get_price_in_eth(&market_params.loan_token, &expected_debt_profit, one_inch).await?;
+        get_price_in_eth(&market_params.loan_token, &expected_debt_profit, one_inch_client).await?;
 
     let (pending_tx, _raw_tx) = create_liquidation_tx(
         liquidator,
@@ -58,7 +58,8 @@ pub async fn trigger_liquidation(
         &swap_params,
         &debt_quote,
         builder_payment_percent,
-    ).await?;
+    )
+    .await?;
 
     // TODO: submit raw tx over Oval node before waiting for the receipt.
     let tx = pending_tx.await?;
@@ -81,12 +82,17 @@ fn calculate_repaid_debt(position: &Position, market: &Market) -> U256 {
     borrow_shares.to_assets_up(&total_borrow_assets, &total_borrow_shares)
 }
 
-async fn get_price_in_eth(token: &Address, amount: &U256, one_inch: &OneInch) -> Result<U256> {
+async fn get_price_in_eth(
+    token: &Address,
+    amount: &U256,
+    one_inch_client: &OneInchClient,
+) -> Result<U256> {
     if U256::is_zero(amount) {
         return Err(eyre!("Quote input amount is zero"));
     }
 
-    let quote = one_inch.quote_token(&token.to_string(), ETH_ADDRESS, &amount.to_string()).await?;
+    let quote =
+        one_inch_client.quote_token(&token.to_string(), ETH_ADDRESS, &amount.to_string()).await?;
 
     let quote_amount = U256::from_str(&quote.dst_amount)?;
 

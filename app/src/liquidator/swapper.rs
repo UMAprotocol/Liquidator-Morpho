@@ -1,7 +1,7 @@
+use crate::aggregator::one_inch::OneInchClient;
 use crate::common::constants_lib::*;
 use crate::common::math_lib::{MathLib, WAD};
 use crate::common::shares_math_lib::SharesMathLib;
-use crate::one_inch::OneInch;
 use bindings::i_morpho::{Market, MarketParams, Position};
 use ethers::prelude::*;
 use eyre::Result;
@@ -19,12 +19,12 @@ pub async fn find_swap_params(
     position: &Position,
     market: &Market,
     collateral_price: &U256,
-    one_inch: &OneInch,
+    one_inch_client: &OneInchClient,
     liquidator_address: &Address,
 ) -> Result<SwapParams> {
     let seized_assets = calculate_seized_assets(market_params, position, market, collateral_price);
 
-    let swap_calldata = one_inch
+    let swap_calldata = one_inch_client
         .swap_calldata(
             &market_params.collateral_token.to_string(),
             &market_params.loan_token.to_string(),

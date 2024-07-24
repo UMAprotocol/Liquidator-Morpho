@@ -1,11 +1,11 @@
 use app::{
+    aggregator::one_inch::OneInchClient,
     db::{
         event_processor::ProcessEvent,
         health_checker::HealthCheck,
         morpho_db::{FileManager, MorphoDB, MorphoDBImpl},
     },
     liquidator::trigger::trigger_liquidation,
-    one_inch::OneInch,
     oracles::price_fetcher::PriceFetcher,
 };
 use bindings::{
@@ -45,7 +45,8 @@ async fn main() -> Result<()> {
     let http_client = Arc::new(http_provider);
 
     let chain_id = http_client.get_chainid().await?.to_string();
-    let one_inch = OneInch::new(&config.one_inch_api_key, &chain_id, config.one_inch_rate_limit);
+    let one_inch_client =
+        OneInchClient::new(&config.one_inch_api_key, &chain_id, config.one_inch_rate_limit);
 
     let mut db: MorphoDB = MorphoDB::load_memory_db(&config.file_name)?;
 
@@ -53,7 +54,8 @@ async fn main() -> Result<()> {
     info!("Last block: {last_block}");
 
     let result =
-        subscribe(&config, &client, &mut db, last_block.into(), &http_client, &one_inch).await;
+        subscribe(&config, &client, &mut db, last_block.into(), &http_client, &one_inch_client)
+            .await;
 
     match result {
         Ok(_) => info!("Listening completed"),
@@ -69,7 +71,7 @@ async fn subscribe(
     db: &mut MorphoDB,
     block_number: U64,
     client: &Arc<Provider<Http>>,
-    one_inch: &OneInch,
+    one_inch_client: &OneInchClient,
 ) -> Result<()> {
     let morpho = IMorpho::new(MORPHO_ADDRESS.parse::<Address>()?, ws_client.clone());
 
@@ -95,7 +97,7 @@ async fn subscribe(
             },
             block = new_block_stream.next() => {
                 info!("New block received: {:?}", block.unwrap().number.unwrap());
-                let result = process_new_block(config, db, client, one_inch).await;
+                let result = process_new_block(config, db, client, one_inch_client).await;
                 match result {
                     Ok(_) => info!("Successfully processed block"),
                     Err(e) => error!("Error while processing block: {:?}", e)
@@ -156,7 +158,7 @@ async fn process_new_block(
     config: &Config,
     db: &MorphoDB,
     client: &Arc<Provider<Http>>,
-    one_inch: &OneInch,
+    one_inch_client: &OneInchClient,
 ) -> Result<()> {
     let oracle_prices = db
         .get_all_markets()
@@ -203,7 +205,7 @@ async fn process_new_block(
                         &market_params,
                         &market_info,
                         price,
-                        one_inch,
+                        one_inch_client,
                         config.builder_payment_percent,
                     )
                     .await;
