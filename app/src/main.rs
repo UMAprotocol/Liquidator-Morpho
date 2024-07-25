@@ -7,6 +7,7 @@ use app::{
     },
     liquidator::trigger::trigger_liquidation,
     oracles::price_fetcher::PriceFetcher,
+    oval::oval_client,
 };
 use bindings::{
     i_morpho::{
@@ -96,8 +97,9 @@ async fn subscribe(
                 }
             },
             block = new_block_stream.next() => {
-                info!("New block received: {:?}", block.unwrap().number.unwrap());
-                let result = process_new_block(config, db, client, one_inch_client).await;
+                let block_number = block.unwrap().number.unwrap();
+                info!("New block received: {:?}", block_number);
+                let result = process_new_block(config, db, client, one_inch_client, &block_number).await;
                 match result {
                     Ok(_) => info!("Successfully processed block"),
                     Err(e) => error!("Error while processing block: {:?}", e)
@@ -159,6 +161,7 @@ async fn process_new_block(
     db: &MorphoDB,
     client: &Arc<Provider<Http>>,
     one_inch_client: &OneInchClient,
+    block_number: &U64,
 ) -> Result<()> {
     let oracle_prices = db
         .get_all_markets()
@@ -175,6 +178,10 @@ async fn process_new_block(
         Provider::<Http>::try_connect(&config.private_rpc).await?,
         wallet,
     ));
+
+    let bundle_signer = get_from_config("BUNDLE_SIGNER_KEY".to_string())?.parse::<LocalWallet>()?;
+
+    let oval_client = Arc::new(oval_client::OvalClient::new(&config.oval_rpc_url, bundle_signer)?);
 
     let liquidator = Liquidator::new(config.liquidator_address.parse::<Address>()?, private_client);
 
@@ -207,6 +214,8 @@ async fn process_new_block(
                         price,
                         one_inch_client,
                         config.builder_payment_percent,
+                        &oval_client,
+                        block_number,
                     )
                     .await;
                     match result {
@@ -335,6 +344,7 @@ async fn sync_to_lastest_block(
 struct Config {
     wss_rpc_url: String,
     http_rpc_url: String,
+    oval_rpc_url: String,
     file_name: String,
     liquidator_address: String,
     unlocked_oval_oracle_address: String,
@@ -358,6 +368,10 @@ impl Config {
         Ok(Config {
             wss_rpc_url: get_from_config("WSS_RPC_URL".to_string())?,
             http_rpc_url: get_from_config("HTTP_RPC_URL".to_string())?,
+            oval_rpc_url: get_from_config_optional(
+                "OVAL_RPC_URL".to_string(),
+                Some("https://rpc.oval.xyz:443".to_string()),
+            )?,
             file_name: get_from_config("FILE_NAME".to_string())?,
             liquidator_address: get_from_config("LIQUIDATOR_ADDRESS".to_string())?,
             unlocked_oval_oracle_address: get_from_config(

@@ -16,3 +16,6 @@ serde_json = { version = "1.0", default-features = false, features = ["alloc"] }
 serde = { version = "1.0.196", features = ["derive"] }
 dotenv = "0.15.0"
 reqwest = { version = "0.12.5", features = ["json"] }
+jsonrpsee-http-client = "0.20.3"
+mev-share-rpc-api = { git = "https://github.com/paradigmxyz/mev-share-rs.git", rev = "c43b5f97", version = "0.1.4" }
+tower = "0.4.13"

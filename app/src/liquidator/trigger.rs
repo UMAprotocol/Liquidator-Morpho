@@ -1,6 +1,7 @@
 use crate::aggregator::one_inch::OneInchClient;
 use crate::common::math_lib::MathLib;
 use crate::common::shares_math_lib::SharesMathLib;
+use crate::oval::oval_client::OvalClient;
 use bindings::{
     i_morpho::{Market, MarketParams, Position},
     liquidator::{LiquidationParams, Liquidator},
@@ -10,7 +11,7 @@ use ethers::{
     middleware::SignerMiddleware,
     providers::{Http, Middleware, PendingTransaction, Provider},
     signers::{Signer, Wallet},
-    types::{Address, Bytes, TxHash, U256},
+    types::{Address, Bytes, TxHash, U256, U64},
     utils::keccak256,
 };
 use eyre::{eyre, Result};
@@ -30,6 +31,8 @@ pub async fn trigger_liquidation(
     collateral_price: &U256,
     one_inch_client: &OneInchClient,
     builder_payment_percent: u8,
+    oval_client: &OvalClient,
+    block_number: &U64,
 ) -> Result<()> {
     let swap_params = find_swap_params(
         market_params,
@@ -51,7 +54,7 @@ pub async fn trigger_liquidation(
     let debt_quote =
         get_price_in_eth(&market_params.loan_token, &expected_debt_profit, one_inch_client).await?;
 
-    let (pending_tx, _raw_tx) = create_liquidation_tx(
+    let (pending_tx, raw_tx) = create_liquidation_tx(
         liquidator,
         market_params,
         user,
@@ -61,7 +64,9 @@ pub async fn trigger_liquidation(
     )
     .await?;
 
-    // TODO: submit raw tx over Oval node before waiting for the receipt.
+    // Target the next block when sending the bundled raw transaction over the Oval node.
+    oval_client.send_raw_txs_bundle(&vec![raw_tx], block_number + 1).await?;
+
     let tx = pending_tx.await?;
 
     match tx {
