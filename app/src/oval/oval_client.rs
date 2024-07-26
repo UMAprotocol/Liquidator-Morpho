@@ -47,11 +47,7 @@ impl OvalClient {
         txs: &Vec<Bytes>,
         block_number: U64,
     ) -> Result<EthBundleHash> {
-        let bundle = EthSendBundle {
-            txs: txs.to_owned(),
-            block_number,
-            ..Default::default()
-        };
+        let bundle = EthSendBundle { txs: txs.to_owned(), block_number, ..Default::default() };
 
         Ok(self.bundle_client.send_bundle(bundle).await?)
     }
