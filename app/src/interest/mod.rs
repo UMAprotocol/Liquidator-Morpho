@@ -70,6 +70,8 @@ impl Accrual for MarketData {
                 return;
             }
 
+            // Morpho contract also checks for non-zero IRM address, but we already filtered this in fetch_borrow_rates,
+            // so there would be no borrow_rate for such market.
             let interest = U256::from(self.state.total_borrow_assets)
                 .w_mul_down(&borrow_rate.w_taylor_compounded(&elapsed));
             self.state.total_borrow_assets += interest.as_u128();
