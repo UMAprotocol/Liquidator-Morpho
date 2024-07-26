@@ -1,11 +1,12 @@
 use app::{
     aggregator::one_inch::OneInchClient,
+    common::types::MarketData,
     db::{
         event_processor::ProcessEvent,
         health_checker::HealthCheck,
         morpho_db::{FileManager, MorphoDB, MorphoDBImpl},
     },
-    interest::borrow_rate_fetcher::{Accrual, BorrowRateFetcher, MarketData},
+    interest::{Accrual, BorrowRateFetcher},
     liquidator::trigger::trigger_liquidation,
     oracles::price_fetcher::PriceFetcher,
     oval::oval_client,
