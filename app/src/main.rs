@@ -5,6 +5,7 @@ use app::{
         health_checker::HealthCheck,
         morpho_db::{FileManager, MorphoDB, MorphoDBImpl},
     },
+    interest::borrow_rate_fetcher::{Accrual, BorrowRateFetcher, MarketData},
     liquidator::trigger::trigger_liquidation,
     oracles::price_fetcher::PriceFetcher,
     oval::oval_client,
@@ -97,12 +98,14 @@ async fn subscribe(
                 }
             },
             block = new_block_stream.next() => {
-                let block_number = block.unwrap().number.unwrap();
+                let block = if let Some(block) = block { block } else { continue };
+                let block_number = if let Some(number) = block.number { number } else { continue };
+
                 info!("New block received: {:?}", block_number);
-                let result = process_new_block(config, db, client, one_inch_client, &block_number).await;
-                match result {
+
+                match process_new_block(config, db, client, one_inch_client, &block_number, &block.timestamp).await {
                     Ok(_) => info!("Successfully processed block"),
-                    Err(e) => error!("Error while processing block: {:?}", e)
+                    Err(e) => error!("Error while processing block: {:?}", e),
                 }
             }
             else => break
@@ -162,6 +165,7 @@ async fn process_new_block(
     client: &Arc<Provider<Http>>,
     one_inch_client: &OneInchClient,
     block_number: &U64,
+    block_timestamp: &U256,
 ) -> Result<()> {
     let oracle_prices = db
         .get_all_markets()
@@ -169,6 +173,8 @@ async fn process_new_block(
         .await?;
 
     let market_ids = db.get_all_market_ids();
+
+    let borrow_rates = market_ids.fetch_borrow_rates(client.clone(), db).await?;
 
     let wallet: LocalWallet = get_from_config("PRIVATE_KEY".to_string())?
         .parse::<LocalWallet>()?
@@ -186,10 +192,15 @@ async fn process_new_block(
     let liquidator = Liquidator::new(config.liquidator_address.parse::<Address>()?, private_client);
 
     for market_id in market_ids {
-        let market_info = db.get_market(&market_id);
-        let market_params = db.get_market_params(&market_id);
+        let mut market = MarketData {
+            id: market_id,
+            state: db.get_market(&market_id),
+            params: db.get_market_params(&market_id),
+        };
+        market.accrue_interest(&borrow_rates, block_timestamp);
+
         let users = db.get_all_users(&market_id);
-        let price = oracle_prices.get(&market_params.oracle);
+        let price = oracle_prices.get(&market.params.oracle);
 
         if let Some(price) = price {
             if price.is_zero() {
@@ -198,7 +209,7 @@ async fn process_new_block(
 
             for user in users {
                 let position = db.get_position(&market_id, &user);
-                if !position.is_healthy(&market_info, &market_params.lltv, price) {
+                if !position.is_healthy(&market.state, &market.params.lltv, price) {
                     warn!(
                         "Position can be liquidated for {:?} and market: {market_id:#032x}",
                         &user
@@ -209,8 +220,8 @@ async fn process_new_block(
                         &liquidator,
                         &user,
                         &position,
-                        &market_params,
-                        &market_info,
+                        &market.params,
+                        &market.state,
                         price,
                         one_inch_client,
                         config.builder_payment_percent,
