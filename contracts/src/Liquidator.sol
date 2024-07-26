@@ -81,10 +81,18 @@ contract Liquidator is IMorphoLiquidateCallback, Ownable {
         IERC20(callbackParams.debt).safeIncreaseAllowance(msg.sender, repaidAssets);
     }
 
-    function swapProfit(address token, uint256 amount, address swapper, bytes calldata swapData) external onlyOwner {
+    function swapERC20(address token, uint256 amount, address swapper, bytes calldata swapData) external onlyOwner {
         IERC20(token).safeIncreaseAllowance(swapper, amount);
 
         swapper.functionCall(swapData);
+    }
+
+    function withdrawERC20(address token, uint256 amount) external onlyOwner {
+        IERC20(token).safeTransfer(msg.sender, amount);
+    }
+
+    function withdrawETH(uint256 amount) external onlyOwner {
+        payable(msg.sender).sendValue(amount);
     }
 
     receive() external payable {}
