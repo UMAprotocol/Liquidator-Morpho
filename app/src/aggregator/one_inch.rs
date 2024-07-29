@@ -9,13 +9,14 @@ use tokio::time::{sleep, Duration};
 #[derive(Clone)]
 pub struct OneInchClient {
     swap_cli: Arc<Mutex<Client>>,
+    base_url: String,
     chain_id: String,
     last_request_time: Arc<Mutex<Option<std::time::Instant>>>,
     rate_limit_millis: u64,
 }
 
 impl OneInchClient {
-    pub fn new(api_key: &str, chain_id: &str, rate_limit_millis: u64) -> Self {
+    pub fn new(api_key: &str, base_url: &str, chain_id: &str, rate_limit_millis: u64) -> Self {
         let client = Client::builder()
             .default_headers({
                 let mut headers = reqwest::header::HeaderMap::new();
@@ -37,6 +38,7 @@ impl OneInchClient {
 
         Self {
             swap_cli: Arc::new(Mutex::new(client)),
+            base_url: base_url.to_string(),
             chain_id: chain_id.to_string(),
             last_request_time: Arc::new(Mutex::new(None)),
             rate_limit_millis,
@@ -68,7 +70,7 @@ impl OneInchClient {
         query_params.insert("amount", in_amt);
         query_params.insert("includeGas", "true");
 
-        let url = format!("https://api.1inch.dev/swap/v6.0/{}/quote", self.chain_id);
+        let url = format!("{}/swap/v6.0/{}/quote", self.base_url, self.chain_id);
 
         let client = self.swap_cli.lock().await;
         let resp = client.get(&url).query(&query_params).send().await?;
@@ -97,7 +99,7 @@ impl OneInchClient {
         query_params.insert("includeGas", "true");
         query_params.insert("disableEstimate", "true");
 
-        let url = format!("https://api.1inch.dev/swap/v6.0/{}/swap", self.chain_id);
+        let url = format!("{}/swap/v6.0/{}/swap", self.base_url, self.chain_id);
 
         let client = self.swap_cli.lock().await;
         let resp = client.get(&url).query(&query_params).send().await?;

@@ -30,9 +30,6 @@ use eyre::{eyre, Result};
 use log::{error, info, warn};
 use std::sync::Arc;
 
-const MORPHO_ADDRESS: &str = "0xBBBBBbbBBb9cC5e90e3b3Af64bdAF62C37EEFFCb";
-const BLOCK_START: u64 = 18883124;
-
 #[tokio::main]
 async fn main() -> Result<()> {
     env_logger::init();
@@ -48,8 +45,12 @@ async fn main() -> Result<()> {
     let http_client = Arc::new(http_provider);
 
     let chain_id = http_client.get_chainid().await?.to_string();
-    let one_inch_client =
-        OneInchClient::new(&config.one_inch_api_key, &chain_id, config.one_inch_rate_limit);
+    let one_inch_client = OneInchClient::new(
+        &config.one_inch_api_key,
+        &config.one_inch_base_url,
+        &chain_id,
+        config.one_inch_rate_limit,
+    );
 
     let mut db: MorphoDB = MorphoDB::load_memory_db(&config.file_name)?;
 
@@ -76,7 +77,7 @@ async fn subscribe(
     client: &Arc<Provider<Http>>,
     one_inch_client: &OneInchClient,
 ) -> Result<()> {
-    let morpho = IMorpho::new(MORPHO_ADDRESS.parse::<Address>()?, ws_client.clone());
+    let morpho = IMorpho::new(config.morpho_address.parse::<Address>()?, ws_client.clone());
 
     let morpho_events = morpho.events().from_block(block_number);
 
@@ -251,8 +252,11 @@ async fn sync_to_lastest_block(
 ) -> Result<u64> {
     let current_block: u64 = client.get_block_number().await.unwrap().try_into().unwrap();
 
-    let mut start_block =
-        if db.last_block_sync < BLOCK_START { BLOCK_START } else { db.last_block_sync };
+    let mut start_block = if db.last_block_sync < config.block_start {
+        config.block_start
+    } else {
+        db.last_block_sync
+    };
 
     let mut logs: Vec<Log> = Vec::new();
 
@@ -266,7 +270,7 @@ async fn sync_to_lastest_block(
         info!("Syncing for blocks between {} and {}", start_block, end_block);
 
         let filter = Filter::new()
-            .address(MORPHO_ADDRESS.parse::<Address>()?)
+            .address(config.morpho_address.parse::<Address>()?)
             .from_block(start_block)
             .to_block(end_block);
 
@@ -358,8 +362,11 @@ struct Config {
     http_rpc_url: String,
     oval_rpc_url: String,
     file_name: String,
+    morpho_address: String,
+    block_start: u64,
     liquidator_address: String,
     unlocked_oval_oracle_address: String,
+    one_inch_base_url: String,
     one_inch_api_key: String,
     one_inch_rate_limit: u64,
     builder_payment_percent: u8,
@@ -384,9 +391,22 @@ impl Config {
                 Some("https://rpc.oval.xyz:443".to_string()),
             )?,
             file_name: get_from_config("FILE_NAME".to_string())?,
+            morpho_address: get_from_config_optional(
+                "MORPHO_ADDRESS".to_string(),
+                Some("0xBBBBBbbBBb9cC5e90e3b3Af64bdAF62C37EEFFCb".to_string()),
+            )?,
+            block_start: get_from_config_optional(
+                "BLOCK_START".to_string(),
+                Some("18883124".to_string()),
+            )?
+            .parse::<u64>()?,
             liquidator_address: get_from_config("LIQUIDATOR_ADDRESS".to_string())?,
             unlocked_oval_oracle_address: get_from_config(
                 "UNLOCKED_OVAL_ORACLE_ADDRESS".to_string(),
+            )?,
+            one_inch_base_url: get_from_config_optional(
+                "ONE_INCH_BASE_URL".to_string(),
+                Some("https://api.1inch.dev".to_string()),
             )?,
             one_inch_api_key: get_from_config("ONE_INCH_API_KEY".to_string())?,
             one_inch_rate_limit: get_from_config_optional(

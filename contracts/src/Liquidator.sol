@@ -30,9 +30,13 @@ contract Liquidator is IMorphoLiquidateCallback, Ownable {
         bytes swapData;
     }
 
-    IMorpho internal constant morpho = IMorpho(0xBBBBBbbBBb9cC5e90e3b3Af64bdAF62C37EEFFCb);
+    IMorpho internal immutable morpho = IMorpho(0xBBBBBbbBBb9cC5e90e3b3Af64bdAF62C37EEFFCb);
 
-    constructor() Ownable(msg.sender) {}
+    constructor(IMorpho _morpho) Ownable(msg.sender) {
+        if (address(_morpho) != address(0)) {
+            morpho = _morpho;
+        }
+    }
 
     function liquidateUser(
         MarketParams memory marketParams,
