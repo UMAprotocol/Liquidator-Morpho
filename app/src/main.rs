@@ -181,8 +181,8 @@ async fn process_new_block(
         .parse::<LocalWallet>()?
         .with_chain_id(Chain::Mainnet);
 
-    let private_client = Arc::new(SignerMiddleware::new(
-        Provider::<Http>::try_connect(&config.private_rpc).await?,
+    let http_client = Arc::new(SignerMiddleware::new(
+        Provider::<Http>::try_connect(&config.http_rpc_url).await?,
         wallet,
     ));
 
@@ -190,7 +190,7 @@ async fn process_new_block(
 
     let oval_client = Arc::new(oval_client::OvalClient::new(&config.oval_rpc_url, bundle_signer)?);
 
-    let liquidator = Liquidator::new(config.liquidator_address.parse::<Address>()?, private_client);
+    let liquidator = Liquidator::new(config.liquidator_address.parse::<Address>()?, http_client);
 
     for market_id in market_ids {
         let mut market = MarketData {
@@ -360,7 +360,6 @@ struct Config {
     file_name: String,
     liquidator_address: String,
     unlocked_oval_oracle_address: String,
-    private_rpc: String,
     one_inch_api_key: String,
     one_inch_rate_limit: u64,
     builder_payment_percent: u8,
@@ -389,7 +388,6 @@ impl Config {
             unlocked_oval_oracle_address: get_from_config(
                 "UNLOCKED_OVAL_ORACLE_ADDRESS".to_string(),
             )?,
-            private_rpc: get_from_config("PRIVATE_RPC".to_string())?,
             one_inch_api_key: get_from_config("ONE_INCH_API_KEY".to_string())?,
             one_inch_rate_limit: get_from_config_optional(
                 "ONE_INCH_RATE_LIMIT".to_string(),

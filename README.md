@@ -7,9 +7,9 @@
 
 # Todo
 - [x] Abstract out constants to `env` args which can be passed at start time
-- [ ] Integrate 1inch or other solver APIs to fetch swap route when liquidating
+- [x] Integrate 1inch or other solver APIs to fetch swap route when liquidating
 - [x] Add signer support for provider which send liquidator transaction
-- [x] Add flashbots support to not allow frontrunning
+- [ ] Add flashbots support to not allow frontrunning
 - [ ] Add support for minimum value of collateral to filter liquidation opportunities
 - [ ] Add batching of liquidation transaction at end of block processing
 - [ ] Add gas fee calculation to ascertain profitability
