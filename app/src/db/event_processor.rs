@@ -6,18 +6,24 @@ use bindings::i_morpho::{
 use std::collections::HashMap;
 
 pub trait ProcessEvent {
-    fn process(self, db: &mut MorphoDB);
+    fn process(self, db: &mut MorphoDB, timestamp: u128);
 }
 
 impl ProcessEvent for CreateMarketFilter {
-    fn process(self, db: &mut MorphoDB) {
+    fn process(self, db: &mut MorphoDB, timestamp: u128) {
         db.market_config.insert(self.id.into(), self.market_params);
         db.market_positions.insert(self.id.into(), HashMap::new());
+
+        let mut market_info = db.get_market(&self.id.into());
+
+        market_info.last_update = timestamp;
+
+        db.update_market(self.id.into(), market_info);
     }
 }
 
 impl ProcessEvent for BorrowFilter {
-    fn process(self, db: &mut MorphoDB) {
+    fn process(self, db: &mut MorphoDB, timestamp: u128) {
         if !db.market_exists(&self.id.into()) {
             return;
         }
@@ -28,6 +34,7 @@ impl ProcessEvent for BorrowFilter {
 
         let mut market_info = db.get_market(&self.id.into());
 
+        market_info.last_update = timestamp;
         market_info.total_borrow_assets += self.assets.as_u128();
         market_info.total_borrow_shares += self.shares.as_u128();
 
@@ -38,7 +45,8 @@ impl ProcessEvent for BorrowFilter {
 }
 
 impl ProcessEvent for SupplyCollateralFilter {
-    fn process(self, db: &mut MorphoDB) {
+    // Timestamp not updated in Morpho contract when supplying collateral.
+    fn process(self, db: &mut MorphoDB, _timestamp: u128) {
         if !db.market_exists(&self.id.into()) {
             return;
         }
@@ -52,7 +60,7 @@ impl ProcessEvent for SupplyCollateralFilter {
 }
 
 impl ProcessEvent for RepayFilter {
-    fn process(self, db: &mut MorphoDB) {
+    fn process(self, db: &mut MorphoDB, timestamp: u128) {
         if !db.market_exists(&self.id.into()) {
             return;
         }
@@ -64,6 +72,7 @@ impl ProcessEvent for RepayFilter {
 
         let mut market_info = db.get_market(&self.id.into());
 
+        market_info.last_update = timestamp;
         market_info.total_borrow_assets =
             if market_info.total_borrow_assets >= self.assets.as_u128() {
                 market_info.total_borrow_assets - self.assets.as_u128()
@@ -78,7 +87,7 @@ impl ProcessEvent for RepayFilter {
 }
 
 impl ProcessEvent for WithdrawCollateralFilter {
-    fn process(self, db: &mut MorphoDB) {
+    fn process(self, db: &mut MorphoDB, timestamp: u128) {
         if !db.market_exists(&self.id.into()) {
             return;
         }
@@ -87,11 +96,17 @@ impl ProcessEvent for WithdrawCollateralFilter {
 
         position.collateral -= self.assets.as_u128();
         db.update_position(&self.id.into(), self.on_behalf, position);
+
+        let mut market_info = db.get_market(&self.id.into());
+
+        market_info.last_update = timestamp;
+
+        db.update_market(self.id.into(), market_info);
     }
 }
 
 impl ProcessEvent for LiquidateFilter {
-    fn process(self, db: &mut MorphoDB) {
+    fn process(self, db: &mut MorphoDB, timestamp: u128) {
         if !db.market_exists(&self.id.into()) {
             return;
         }
@@ -105,6 +120,7 @@ impl ProcessEvent for LiquidateFilter {
 
         let mut market_info = db.get_market(&self.id.into());
 
+        market_info.last_update = timestamp;
         market_info.total_borrow_shares -=
             self.repaid_shares.as_u128() + self.bad_debt_shares.as_u128();
         market_info.total_borrow_assets =
@@ -126,9 +142,10 @@ impl ProcessEvent for LiquidateFilter {
 }
 
 impl ProcessEvent for AccrueInterestFilter {
-    fn process(self, db: &mut MorphoDB) {
+    fn process(self, db: &mut MorphoDB, timestamp: u128) {
         let mut market_info = db.get_market(&self.id.into());
 
+        market_info.last_update = timestamp;
         market_info.total_borrow_assets += self.interest.as_u128();
         market_info.total_supply_assets += self.interest.as_u128();
         market_info.total_supply_shares += self.fee_shares.as_u128();
@@ -138,9 +155,10 @@ impl ProcessEvent for AccrueInterestFilter {
 }
 
 impl ProcessEvent for SupplyFilter {
-    fn process(self, db: &mut MorphoDB) {
+    fn process(self, db: &mut MorphoDB, timestamp: u128) {
         let mut market_info = db.get_market(&self.id.into());
 
+        market_info.last_update = timestamp;
         market_info.total_supply_assets += self.assets.as_u128();
         market_info.total_supply_shares += self.shares.as_u128();
 
@@ -149,9 +167,10 @@ impl ProcessEvent for SupplyFilter {
 }
 
 impl ProcessEvent for WithdrawFilter {
-    fn process(self, db: &mut MorphoDB) {
+    fn process(self, db: &mut MorphoDB, timestamp: u128) {
         let mut market_info = db.get_market(&self.id.into());
 
+        market_info.last_update = timestamp;
         market_info.total_supply_shares -= self.shares.as_u128();
         market_info.total_supply_assets -= self.assets.as_u128();
 

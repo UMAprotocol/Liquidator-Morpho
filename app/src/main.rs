@@ -13,9 +13,8 @@ use app::{
 };
 use bindings::{
     i_morpho::{
-        AccrueInterestFilter, BorrowFilter, CreateMarketFilter, IMorpho, IMorphoEvents,
-        LiquidateFilter, RepayFilter, SupplyCollateralFilter, SupplyFilter,
-        WithdrawCollateralFilter, WithdrawFilter,
+        AccrueInterestFilter, BorrowFilter, CreateMarketFilter, LiquidateFilter, RepayFilter,
+        SupplyCollateralFilter, SupplyFilter, WithdrawCollateralFilter, WithdrawFilter,
     },
     liquidator::Liquidator,
 };
@@ -54,12 +53,11 @@ async fn main() -> Result<()> {
 
     let mut db: MorphoDB = MorphoDB::load_memory_db(&config.file_name)?;
 
-    let last_block = sync_to_lastest_block(&config, &mut db, http_client.clone()).await?;
+    let last_block =
+        sync_to_lastest_block(&config, &mut db, http_client.clone(), None, None).await?;
     info!("Last block: {last_block}");
 
-    let result =
-        subscribe(&config, &client, &mut db, last_block.into(), &http_client, &one_inch_client)
-            .await;
+    let result = subscribe(&config, &client, &mut db, &http_client, &one_inch_client).await;
 
     match result {
         Ok(_) => info!("Listening completed"),
@@ -73,32 +71,15 @@ async fn subscribe(
     config: &Config,
     ws_client: &Arc<Provider<Ws>>,
     db: &mut MorphoDB,
-    block_number: U64,
     client: &Arc<Provider<Http>>,
     one_inch_client: &OneInchClient,
 ) -> Result<()> {
-    let morpho = IMorpho::new(config.morpho_address.parse::<Address>()?, ws_client.clone());
-
-    let morpho_events = morpho.events().from_block(block_number);
-
-    let mut morpho_events_stream = morpho_events.stream().await?;
     let mut new_block_stream = ws_client.subscribe_blocks().await?;
-
-    info!("Started listening to events");
 
     info!("Started listening to new blocks");
 
     loop {
         tokio::select! {
-            event = morpho_events_stream.next() => {
-                if let Some(Ok(event)) = event {
-                    let result = process_event(event, db);
-                    match result {
-                        Ok(_) => info!("Successfully processed events"),
-                        Err(e) => error!("Error while processing event: {:?}", e)
-                    }
-                }
-            },
             block = new_block_stream.next() => {
                 let block = if let Some(block) = block { block } else { continue };
                 let block_number = if let Some(number) = block.number { number } else { continue };
@@ -117,58 +98,17 @@ async fn subscribe(
     Ok(())
 }
 
-fn process_event(event: IMorphoEvents, db: &mut MorphoDB) -> Result<()> {
-    match event {
-        IMorphoEvents::BorrowFilter(f) => {
-            info!("Borrowed by {}", f.on_behalf);
-            f.process(db)
-        }
-        IMorphoEvents::LiquidateFilter(f) => {
-            info!("Liquidated {}", f.borrower);
-            f.process(db)
-        }
-        IMorphoEvents::RepayFilter(f) => {
-            info!("Repaid for {}", f.on_behalf);
-            f.process(db)
-        }
-        IMorphoEvents::SupplyCollateralFilter(f) => {
-            info!("Supplied collateral for {}", f.on_behalf);
-            f.process(db)
-        }
-        IMorphoEvents::WithdrawCollateralFilter(f) => {
-            info!("Withdrawn collateral for {}", f.on_behalf);
-            f.process(db)
-        }
-        IMorphoEvents::CreateMarketFilter(f) => {
-            info!("Market created {:?}", f.id);
-            f.process(db)
-        }
-        IMorphoEvents::AccrueInterestFilter(f) => {
-            info!("Interest Accrued {:?}", f.id);
-            f.process(db)
-        }
-        IMorphoEvents::SupplyFilter(f) => {
-            info!("Supplied {:?}", f.id);
-            f.process(db)
-        }
-        IMorphoEvents::WithdrawFilter(f) => {
-            info!("Withdrawn {:?}", f.id);
-            f.process(db)
-        }
-        _ => info!("Unchecked events"),
-    }
-
-    Ok(())
-}
-
 async fn process_new_block(
     config: &Config,
-    db: &MorphoDB,
+    db: &mut MorphoDB,
     client: &Arc<Provider<Http>>,
     one_inch_client: &OneInchClient,
     block_number: &U64,
     block_timestamp: &U256,
 ) -> Result<()> {
+    sync_to_lastest_block(config, db, client.clone(), Some(block_number), Some(block_timestamp))
+        .await?;
+
     let oracle_prices = db
         .get_all_markets()
         .fetch_prices(client.clone(), config.unlocked_oval_oracle_address.parse::<Address>()?)
@@ -245,12 +185,31 @@ async fn process_new_block(
     Ok(())
 }
 
+async fn get_block_timestamp(client: Arc<Provider<Http>>, block_number: u64) -> Result<u128> {
+    let block = client.get_block(block_number).await?;
+    match block {
+        Some(block) => Ok(block.timestamp.as_u128()),
+        None => Err(eyre!("Block {} not found", block_number)),
+    }
+}
+
 async fn sync_to_lastest_block(
     config: &Config,
     db: &mut MorphoDB,
     client: Arc<Provider<Http>>,
+    current_block: Option<&U64>,
+    current_timestamp: Option<&U256>,
 ) -> Result<u64> {
-    let current_block: u64 = client.get_block_number().await.unwrap().try_into().unwrap();
+    let current_block = match current_block {
+        Some(block_number) => block_number.to_owned(),
+        None => client.get_block_number().await?,
+    }
+    .as_u64();
+
+    let current_timestamp = match current_timestamp {
+        Some(timestamp) => timestamp.as_u128(),
+        None => get_block_timestamp(client.clone(), current_block).await?,
+    };
 
     let mut start_block = if db.last_block_sync < config.block_start {
         config.block_start
@@ -288,6 +247,14 @@ async fn sync_to_lastest_block(
             continue;
         }
 
+        let log_timestamp = match log.block_number {
+            None => Err(eyre!("Block number not found in log"))?,
+            Some(block_number) => match block_number.as_u64() == current_block {
+                true => current_timestamp,
+                false => get_block_timestamp(client.clone(), block_number.as_u64()).await?,
+            },
+        };
+
         match log.topics[0] {
             x if x == CreateMarketFilter::signature() => {
                 let event = <CreateMarketFilter as EthLogDecode>::decode_log(&RawLog::from(
@@ -297,54 +264,54 @@ async fn sync_to_lastest_block(
                 if event.market_params.lltv.is_zero() {
                     continue;
                 }
-                event.process(db);
+                event.process(db, log_timestamp);
             }
             x if x == BorrowFilter::signature() => {
                 let event =
                     <BorrowFilter as EthLogDecode>::decode_log(&RawLog::from(log.to_owned()))?;
-                event.process(db);
+                event.process(db, log_timestamp);
             }
             x if x == SupplyCollateralFilter::signature() => {
                 let event = <SupplyCollateralFilter as EthLogDecode>::decode_log(&RawLog::from(
                     log.to_owned(),
                 ))?;
-                event.process(db);
+                event.process(db, log_timestamp);
             }
             x if x == RepayFilter::signature() => {
                 let event =
                     <RepayFilter as EthLogDecode>::decode_log(&RawLog::from(log.to_owned()))?;
-                event.process(db);
+                event.process(db, log_timestamp);
             }
             x if x == WithdrawCollateralFilter::signature() => {
                 let event = <WithdrawCollateralFilter as EthLogDecode>::decode_log(&RawLog::from(
                     log.to_owned(),
                 ))?;
-                event.process(db);
+                event.process(db, log_timestamp);
             }
             x if x == LiquidateFilter::signature() => {
                 let event =
                     <LiquidateFilter as EthLogDecode>::decode_log(&RawLog::from(log.to_owned()))?;
 
-                event.process(db);
+                event.process(db, log_timestamp);
             }
             x if x == SupplyFilter::signature() => {
                 let event =
                     <SupplyFilter as EthLogDecode>::decode_log(&RawLog::from(log.to_owned()))?;
 
-                event.process(db);
+                event.process(db, log_timestamp);
             }
             x if x == WithdrawFilter::signature() => {
                 let event =
                     <WithdrawFilter as EthLogDecode>::decode_log(&RawLog::from(log.to_owned()))?;
 
-                event.process(db);
+                event.process(db, log_timestamp);
             }
             x if x == AccrueInterestFilter::signature() => {
                 let event = <AccrueInterestFilter as EthLogDecode>::decode_log(&RawLog::from(
                     log.to_owned(),
                 ))?;
 
-                event.process(db);
+                event.process(db, log_timestamp);
             }
             _ => {}
         }
