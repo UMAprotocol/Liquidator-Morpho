@@ -255,7 +255,7 @@ async fn sync_to_lastest_block(
     let mut start_block = if db.last_block_sync < config.block_start {
         config.block_start
     } else {
-        db.last_block_sync
+        db.last_block_sync + 1
     };
 
     let mut logs: Vec<Log> = Vec::new();
