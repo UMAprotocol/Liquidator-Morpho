@@ -8,8 +8,8 @@
 ## Instructions
 - Install dependencies with `make setup`
 - Build the project with `make build-release`
-- Deploy `contracts/src/UnlockedOvalOracle.sol`
-- Deploy `contracts/src/Liquidator.sol`
+- Deploy `contracts/src/UnlockedOvalOracle.sol:UnlockedOvalOracle`
+- Deploy `contracts/src/Liquidator.sol:Liquidator`
 - Fund the deployed `Liquidator` contract with ETH to cover expected builder payments
 - Create `.env` file using `.env.example` as reference and fill in the required values
 - Run the bot with `cargo run --release` (export `RUST_LOG` to required log level)
