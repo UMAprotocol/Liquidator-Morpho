@@ -47,7 +47,7 @@ test:
 
 # Target for installing forge dependencies
 setup:
-	@forge install
+	@forge install --no-commit --root $(CONTRACTS_PATH)
 
 
 # Declare phony targets
