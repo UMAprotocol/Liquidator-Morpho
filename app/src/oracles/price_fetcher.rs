@@ -51,9 +51,9 @@ pub async fn fetch_all_oracle_prices(
 
     let mut multicall_calls: Aggregate3Call = Aggregate3Call { calls: vec![] };
 
-    for oracle_address in oracles_addresses {
+    for oracle_address in oracles_addresses.clone() {
         let calldata = UnlockedOvalOracle::new(Address::random(), provider.clone())
-            .unlocked_oracle_price(oracle_address)
+            .unlocked_oracle_price(oracle_address.to_owned())
             .calldata()
             .unwrap();
 
@@ -72,7 +72,7 @@ pub async fn fetch_all_oracle_prices(
         }
 
         let values = &value.return_data.0;
-        prices.insert(multicall_calls.calls[i].target, AbiDecode::decode(values)?);
+        prices.insert(oracles_addresses[i], AbiDecode::decode(values)?);
     }
 
     Ok(prices)
