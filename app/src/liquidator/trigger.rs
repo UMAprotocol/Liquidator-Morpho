@@ -1,5 +1,6 @@
 use crate::aggregator::one_inch::OneInchClient;
-use crate::common::math_lib::MathLib;
+use crate::common::constants_lib::*;
+use crate::common::math_lib::{MathLib, WAD};
 use crate::common::shares_math_lib::SharesMathLib;
 use crate::oval::oval_client::OvalClient;
 use bindings::{
@@ -33,17 +34,13 @@ pub async fn trigger_liquidation(
     oval_client: &OvalClient,
     block_number: &U64,
 ) -> Result<()> {
-    let swap_params = find_swap_params(
-        market_params,
-        position,
-        market,
-        collateral_price,
-        one_inch_client,
-        &liquidator.address(),
-    )
-    .await?;
+    let (seized_assets, repaid_debt) =
+        calculate_liquidated_amounts(market_params, position, market, collateral_price);
 
-    let repaid_debt = calculate_repaid_debt(position, market);
+    let swap_params =
+        find_swap_params(market_params, seized_assets, one_inch_client, &liquidator.address())
+            .await?;
+
     if repaid_debt > swap_params.swapped_debt {
         return Err(eyre!("Repaid debt is greater than swap result from the collateral"));
     }
@@ -78,12 +75,33 @@ pub async fn trigger_liquidation(
 
 // This does not handle errors as it is only used in the context of the liquidation and all the shares math replicates
 // the logic from Morpho Blue contract.
-fn calculate_repaid_debt(position: &Position, market: &Market) -> U256 {
+fn calculate_liquidated_amounts(
+    market_params: &MarketParams,
+    position: &Position,
+    market: &Market,
+    collateral_price: &U256,
+) -> (U256, U256) {
     let borrow_shares = U256::from(position.borrow_shares);
     let total_borrow_assets = U256::from(market.total_borrow_assets);
     let total_borrow_shares = U256::from(market.total_borrow_shares);
 
-    borrow_shares.to_assets_up(&total_borrow_assets, &total_borrow_shares)
+    // The liquidation incentive factor is min(maxLiquidationIncentiveFactor, 1/(1 - cursor*(1 - lltv))).
+    let liquidation_incentive_factor = MAX_LIQUIDATION_INCENTIVE_FACTOR
+        .min(WAD.w_div_down(&(WAD - LIQUIDATION_CURSOR.w_mul_down(&(WAD - market_params.lltv)))));
+
+    // Get seized assets as if all the debt was repaid, but limited to the user collateral.
+    let seized_assets = borrow_shares
+        .to_assets_down(&total_borrow_assets, &total_borrow_shares)
+        .w_mul_down(&liquidation_incentive_factor)
+        .mul_div_down(&ORACLE_PRICE_SCALE, collateral_price)
+        .min(U256::from(position.collateral));
+
+    // Get repaid debt based on actual seized assets. This can be less that user debt if bad debt is incurred.
+    let repaid_debt = seized_assets
+        .mul_div_up(&collateral_price, &ORACLE_PRICE_SCALE)
+        .w_div_up(&liquidation_incentive_factor);
+
+    (seized_assets, repaid_debt)
 }
 
 async fn get_price_in_eth(
