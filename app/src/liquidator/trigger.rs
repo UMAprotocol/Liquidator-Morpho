@@ -148,7 +148,13 @@ async fn create_liquidation_tx<'a>(
             liquidation_params,
         )
         .tx;
+
+    // Set arbitrary gas limit as estimation could fail due to locked Oval price. Even if some providers support passing
+    // state overrides, it is not supported by the ethers library.
+    tx_request.set_gas(U256::from(1_000_000));
+
     tx_request.set_chain_id(chain_id);
+
     liquidator.client().fill_transaction(&mut tx_request, None).await?;
 
     let raw_tx = tx_request
