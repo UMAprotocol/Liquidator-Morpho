@@ -12,11 +12,10 @@ use ethers::{
     providers::{Http, Middleware, PendingTransaction, Provider},
     signers::{Signer, Wallet},
     types::{Address, Bytes, TxHash, U256, U64},
-    utils::keccak256,
+    utils::{hex::ToHexExt, keccak256},
 };
 use eyre::{eyre, Result};
 use log::{info, warn};
-use std::str::FromStr;
 
 use super::swapper::{find_swap_params, SwapParams};
 
@@ -96,10 +95,11 @@ async fn get_price_in_eth(
         return Err(eyre!("Quote input amount is zero"));
     }
 
-    let quote =
-        one_inch_client.quote_token(&token.to_string(), ETH_ADDRESS, &amount.to_string()).await?;
+    let quote = one_inch_client
+        .quote_token(&token.encode_hex_with_prefix(), ETH_ADDRESS, &amount.to_string())
+        .await?;
 
-    let quote_amount = U256::from_str(&quote.dst_amount)?;
+    let quote_amount = U256::from(quote.dst_amount.parse::<u128>()?);
 
     Ok(quote_amount.w_div_down(amount))
 }
