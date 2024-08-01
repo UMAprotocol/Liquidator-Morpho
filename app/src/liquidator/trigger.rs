@@ -33,6 +33,7 @@ pub async fn trigger_liquidation(
     builder_payment_percent: u8,
     oval_client: &OvalClient,
     block_number: &U64,
+    chain_id: u64,
 ) -> Result<()> {
     let (seized_assets, repaid_debt) =
         calculate_liquidated_amounts(market_params, position, market, collateral_price);
@@ -57,6 +58,7 @@ pub async fn trigger_liquidation(
         &swap_params,
         &debt_quote,
         builder_payment_percent,
+        chain_id,
     )
     .await?;
 
@@ -129,6 +131,7 @@ async fn create_liquidation_tx<'a>(
     swap_params: &SwapParams,
     debt_quote: &U256,
     builder_payment_percent: u8,
+    chain_id: u64,
 ) -> Result<(PendingTransaction<'a, Http>, Bytes)> {
     let liquidation_params = LiquidationParams {
         debt_quote: debt_quote.to_owned(),
@@ -145,6 +148,7 @@ async fn create_liquidation_tx<'a>(
             liquidation_params,
         )
         .tx;
+    tx_request.set_chain_id(chain_id);
     liquidator.client().fill_transaction(&mut tx_request, None).await?;
 
     let raw_tx = tx_request

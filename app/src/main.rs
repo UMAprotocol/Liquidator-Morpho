@@ -43,11 +43,11 @@ async fn main() -> Result<()> {
 
     let http_client = Arc::new(http_provider);
 
-    let chain_id = http_client.get_chainid().await?.to_string();
+    let chain_id = http_client.get_chainid().await?;
     let one_inch_client = OneInchClient::new(
         &config.one_inch_api_key,
         &config.one_inch_base_url,
-        &chain_id,
+        &chain_id.to_string(),
         config.one_inch_rate_limit,
     );
 
@@ -57,7 +57,8 @@ async fn main() -> Result<()> {
         sync_to_lastest_block(&config, &mut db, http_client.clone(), None, None).await?;
     info!("Last block: {last_block}");
 
-    let result = subscribe(&config, &client, &mut db, &http_client, &one_inch_client).await;
+    let result =
+        subscribe(&config, &client, &mut db, &http_client, &one_inch_client, &chain_id).await;
 
     match result {
         Ok(_) => info!("Listening completed"),
@@ -73,6 +74,7 @@ async fn subscribe(
     db: &mut MorphoDB,
     client: &Arc<Provider<Http>>,
     one_inch_client: &OneInchClient,
+    chain_id: &U256,
 ) -> Result<()> {
     let mut new_block_stream = ws_client.subscribe_blocks().await?;
 
@@ -86,7 +88,15 @@ async fn subscribe(
 
                 info!("New block received: {:?}", block_number);
 
-                match process_new_block(config, db, client, one_inch_client, &block_number, &block.timestamp).await {
+                match process_new_block(
+                    config,
+                    db,
+                    client,
+                    one_inch_client,
+                    &block_number,
+                    &block.timestamp,
+                    chain_id.as_u64(),
+                ).await {
                     Ok(_) => info!("Successfully processed block"),
                     Err(e) => error!("Error while processing block: {:?}", e),
                 }
@@ -105,6 +115,7 @@ async fn process_new_block(
     one_inch_client: &OneInchClient,
     block_number: &U64,
     block_timestamp: &U256,
+    chain_id: u64,
 ) -> Result<()> {
     sync_to_lastest_block(config, db, client.clone(), Some(block_number), Some(block_timestamp))
         .await?;
@@ -118,9 +129,8 @@ async fn process_new_block(
 
     let borrow_rates = market_ids.fetch_borrow_rates(client.clone(), db).await?;
 
-    let wallet: LocalWallet = get_from_config("PRIVATE_KEY".to_string())?
-        .parse::<LocalWallet>()?
-        .with_chain_id(Chain::Mainnet);
+    let wallet: LocalWallet =
+        get_from_config("PRIVATE_KEY".to_string())?.parse::<LocalWallet>()?.with_chain_id(chain_id);
 
     let http_client = Arc::new(SignerMiddleware::new(
         Provider::<Http>::try_connect(&config.http_rpc_url).await?,
@@ -169,6 +179,7 @@ async fn process_new_block(
                         config.builder_payment_percent,
                         &oval_client,
                         block_number,
+                        chain_id,
                     )
                     .await;
                     match result {
