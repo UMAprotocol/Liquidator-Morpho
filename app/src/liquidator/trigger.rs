@@ -16,13 +16,15 @@ use ethers::{
     utils::{hex::ToHexExt, keccak256},
 };
 use eyre::{eyre, Result};
-use log::{info, warn};
+use log::{debug, error, info, warn};
+use std::sync::Arc;
 
 use super::swapper::{find_swap_params, SwapParams};
 
 const ETH_ADDRESS: &str = "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE";
 
 pub async fn trigger_liquidation(
+    client: Arc<Provider<Http>>,
     liquidator: &Liquidator<SignerMiddleware<Provider<Http>, Wallet<SigningKey>>>,
     user: &Address,
     position: &Position,
@@ -34,7 +36,7 @@ pub async fn trigger_liquidation(
     oval_client: &OvalClient,
     block_number: &U64,
     chain_id: u64,
-) -> Result<()> {
+) -> Result<TxHash> {
     let (seized_assets, repaid_debt) =
         calculate_liquidated_amounts(market_params, position, market, collateral_price);
 
@@ -51,7 +53,7 @@ pub async fn trigger_liquidation(
     let debt_quote =
         get_price_in_eth(&market_params.loan_token, &expected_debt_profit, one_inch_client).await?;
 
-    let (pending_tx, raw_tx) = create_liquidation_tx(
+    let raw_tx = create_liquidation_tx(
         liquidator,
         market_params,
         user,
@@ -63,16 +65,29 @@ pub async fn trigger_liquidation(
     .await?;
 
     // Target the next block when sending the bundled raw transaction over the Oval node.
-    oval_client.send_raw_txs_bundle(&vec![raw_tx], block_number + 1).await?;
+    oval_client.send_raw_txs_bundle(&vec![raw_tx.clone()], block_number + 1).await?;
 
-    let tx = pending_tx.await?;
+    let tx_hash = TxHash(keccak256(raw_tx));
 
-    match tx {
-        Some(receipt) => info!("Successful Transaction: {:?}", receipt),
-        None => warn!("Empty transaction receipt"),
-    }
+    // Spawn a task to log the result of the liquidation transaction without blocking the main thread.
+    tokio::spawn(async move {
+        let pending_tx = {
+            let provider_ref = Arc::as_ref(&client);
+            PendingTransaction::new(tx_hash, provider_ref)
+        };
+        match pending_tx.await {
+            Ok(result) => match result {
+                Some(receipt) => {
+                    info!("Successful liquidation tx: {:?}", receipt.transaction_hash);
+                    debug!("Liquidation tx receipt: {:#?}", receipt);
+                }
+                None => warn!("Liquidation transaction {:?} was not mined", tx_hash),
+            },
+            Err(e) => error!("Error sending liquidation tx {:?}: {}", tx_hash, e),
+        }
+    });
 
-    Ok(())
+    Ok(tx_hash)
 }
 
 // This does not handle errors as it is only used in the context of the liquidation and all the shares math replicates
@@ -124,15 +139,15 @@ async fn get_price_in_eth(
     Ok(quote_amount.w_div_down(amount))
 }
 
-async fn create_liquidation_tx<'a>(
-    liquidator: &'a Liquidator<SignerMiddleware<Provider<Http>, Wallet<SigningKey>>>,
+async fn create_liquidation_tx(
+    liquidator: &Liquidator<SignerMiddleware<Provider<Http>, Wallet<SigningKey>>>,
     market_params: &MarketParams,
     user: &Address,
     swap_params: &SwapParams,
     debt_quote: &U256,
     builder_payment_percent: u8,
     chain_id: u64,
-) -> Result<(PendingTransaction<'a, Http>, Bytes)> {
+) -> Result<Bytes> {
     let liquidation_params = LiquidationParams {
         debt_quote: debt_quote.to_owned(),
         builder_payment_percent: U256::from(builder_payment_percent).w_div_down(&U256::from(100)),
@@ -160,8 +175,5 @@ async fn create_liquidation_tx<'a>(
     let raw_tx = tx_request
         .rlp_signed(&liquidator.client_ref().signer().sign_transaction(&tx_request).await?);
 
-    let tx_hash = TxHash(keccak256(raw_tx.clone()));
-    let pending_tx = PendingTransaction::new(tx_hash, &liquidator.client_ref().provider());
-
-    Ok((pending_tx, raw_tx))
+    Ok(raw_tx)
 }

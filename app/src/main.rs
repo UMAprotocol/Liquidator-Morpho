@@ -169,6 +169,7 @@ async fn process_new_block(
                     info!("Triggering liquidation");
 
                     let result = trigger_liquidation(
+                        client.clone(),
                         &liquidator,
                         &user,
                         &position,
@@ -183,7 +184,7 @@ async fn process_new_block(
                     )
                     .await;
                     match result {
-                        Ok(()) => info!("Successful liquidation"),
+                        Ok(tx_hash) => info!("Submitted liquidation with tx hash: {:?}", tx_hash),
                         Err(e) => error!("Errored while liquidation: {}", e),
                     }
                 }
