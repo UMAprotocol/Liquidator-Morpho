@@ -1,3 +1,6 @@
+use crate::common::{
+    constants_lib::ORACLE_PRICE_SCALE, math_lib::MathLib, shares_math_lib::SharesMathLib,
+};
 use bindings::i_morpho::{Market, Position};
 use ethers::prelude::*;
 
@@ -5,18 +8,17 @@ pub trait HealthCheck {
     fn is_healthy(&self, market: &Market, lltv: &U256, price: &U256) -> bool;
 }
 
-const VIRTUAL_ASSETS: u128 = 1;
-const VIRTUAL_SHARES: u128 = 1_000_000;
-
 impl HealthCheck for Position {
+    // Health check logic from _isHealthy method in
+    // https://github.com/morpho-org/morpho-blue/blob/main/src/Morpho.sol
     fn is_healthy(&self, market: &Market, lltv: &U256, price: &U256) -> bool {
-        let max_borrow = (U256::from(self.collateral) * price / U256::exp10(36)).as_u128()
-            * lltv.as_u128()
-            / U256::exp10(18).as_u128();
+        let borrowed = U256::from(self.borrow_shares).to_assets_up(
+            &U256::from(market.total_borrow_assets),
+            &U256::from(market.total_borrow_shares),
+        );
+        let max_borrow =
+            U256::from(self.collateral).mul_div_down(price, &ORACLE_PRICE_SCALE).w_mul_down(lltv);
 
-        let borrowed_assets = self.borrow_shares * (market.total_borrow_assets + VIRTUAL_ASSETS)
-            / (market.total_borrow_shares + VIRTUAL_SHARES);
-
-        max_borrow >= borrowed_assets
+        max_borrow >= borrowed
     }
 }

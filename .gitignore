@@ -3,3 +3,4 @@ out/
 cache/
 Cargo.lock
 .env
+/crates/bindings

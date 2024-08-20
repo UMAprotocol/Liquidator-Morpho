@@ -6,66 +6,98 @@ import {IMorpho, MarketParams} from "./IMorpho.sol";
 import {IERC20} from "openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "openzeppelin-contracts/contracts/token/ERC20/utils/SafeERC20.sol";
 import {Address} from "openzeppelin-contracts/contracts/utils/Address.sol";
+import {Ownable} from "openzeppelin-contracts/contracts/access/Ownable.sol";
 
 /// @author etherhood
 /// @notice Liquidator contract which sells collateral for debt tokens
 /// @notice Tokens should never be left over in this contract
-contract Liquidator is IMorphoLiquidateCallback {
+contract Liquidator is IMorphoLiquidateCallback, Ownable {
     using SafeERC20 for IERC20;
     using Address for address;
+    using Address for address payable;
 
-    struct LiquidateParams {
+    struct CallbackParams {
         address swapper;
         address collateral;
         address debt;
         bytes swapData;
     }
 
-    IMorpho internal constant morpho = IMorpho(0xBBBBBbbBBb9cC5e90e3b3Af64bdAF62C37EEFFCb);
+    struct LiquidationParams {
+        uint256 debtQuote;
+        uint256 builderPaymentPercent;
+        address swapper;
+        bytes swapData;
+    }
+
+    IMorpho internal immutable morpho = IMorpho(0xBBBBBbbBBb9cC5e90e3b3Af64bdAF62C37EEFFCb);
+
+    constructor(IMorpho _morpho) Ownable(msg.sender) {
+        if (address(_morpho) != address(0)) {
+            morpho = _morpho;
+        }
+    }
 
     function liquidateUser(
         MarketParams memory marketParams,
         address user,
-        address swapper,
         uint256 seizedAssets,
-        bytes calldata swapData
-    ) external {
+        LiquidationParams memory liquidationParams
+    ) external onlyOwner {
+        IERC20 debt = IERC20(marketParams.loanToken);
+        uint256 startBalance = debt.balanceOf(address(this));
+
         morpho.liquidate(
             marketParams,
             user,
             seizedAssets,
             0,
-            abi.encode(LiquidateParams(swapper, marketParams.collateralToken, marketParams.loanToken, swapData))
+            abi.encode(
+                CallbackParams(
+                    liquidationParams.swapper,
+                    marketParams.collateralToken,
+                    marketParams.loanToken,
+                    liquidationParams.swapData
+                )
+            )
         );
 
-        IERC20 collateral = IERC20(marketParams.collateralToken);
+        uint256 endBalance = debt.balanceOf(address(this));
+        require(endBalance > startBalance, "Liquidator: Not profitable");
 
-        uint256 balance = collateral.balanceOf(address(this));
-
-        if (balance > 0) {
-            collateral.safeTransfer(msg.sender, balance);
-        }
-
-        IERC20 debt = IERC20(marketParams.loanToken);
-
-        balance = debt.balanceOf(address(this));
-
-        if (balance > 0) {
-            debt.safeTransfer(msg.sender, balance);
-        }
+        uint256 grossProfit = endBalance - startBalance;
+        uint256 builderPayment =
+            grossProfit * liquidationParams.debtQuote / 1e18 * liquidationParams.builderPaymentPercent / 1e18;
+        block.coinbase.sendValue(builderPayment);
     }
 
     function onMorphoLiquidate(uint256 repaidAssets, bytes calldata data) external {
         require(address(morpho) == msg.sender, "Liquidator: Invalid address");
 
-        LiquidateParams memory liquidateParams = abi.decode(data, (LiquidateParams));
+        CallbackParams memory callbackParams = abi.decode(data, (CallbackParams));
 
-        uint256 collateralSeized = IERC20(liquidateParams.collateral).balanceOf(address(this));
+        uint256 collateralSeized = IERC20(callbackParams.collateral).balanceOf(address(this));
 
-        IERC20(liquidateParams.collateral).safeIncreaseAllowance(liquidateParams.swapper, collateralSeized);
+        IERC20(callbackParams.collateral).safeIncreaseAllowance(callbackParams.swapper, collateralSeized);
 
-        liquidateParams.swapper.functionCall(liquidateParams.swapData);
+        callbackParams.swapper.functionCall(callbackParams.swapData);
 
-        IERC20(liquidateParams.debt).safeIncreaseAllowance(msg.sender, repaidAssets);
+        IERC20(callbackParams.debt).safeIncreaseAllowance(msg.sender, repaidAssets);
     }
+
+    function swapERC20(address token, uint256 amount, address swapper, bytes calldata swapData) external onlyOwner {
+        IERC20(token).safeIncreaseAllowance(swapper, amount);
+
+        swapper.functionCall(swapData);
+    }
+
+    function withdrawERC20(address token, uint256 amount) external onlyOwner {
+        IERC20(token).safeTransfer(msg.sender, amount);
+    }
+
+    function withdrawETH(uint256 amount) external onlyOwner {
+        payable(msg.sender).sendValue(amount);
+    }
+
+    receive() external payable {}
 }

@@ -5,7 +5,7 @@ use log::info;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
-    fs::{write, File},
+    fs::{rename, write, File},
     io::{BufReader, Read},
 };
 
@@ -122,7 +122,12 @@ impl FileManager for MorphoDB {
 
     fn write_memory_db(&self, file_name: &str) -> Result<()> {
         let data_json = serde_json::to_string(self)?;
-        write(file_name, data_json.as_bytes())?;
+
+        let temp_file_name = format!("{}.tmp", file_name);
+
+        write(&temp_file_name, data_json.as_bytes())?;
+        rename(&temp_file_name, file_name)?;
+
         Ok(())
     }
 }
